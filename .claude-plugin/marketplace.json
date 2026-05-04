@@ -1,0 +1,13 @@
+{
+  "name": "poor-mans-mythos",
+  "owner": {
+    "name": "Hans Kristian Henriksen"
+  },
+  "plugins": [
+    {
+      "name": "poor-mans-mythos",
+      "source": ".",
+      "description": "Security audit skill that performs a full repo-wide security review using multi-agent analysis."
+    }
+  ]
+}

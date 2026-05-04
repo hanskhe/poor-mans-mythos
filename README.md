@@ -13,7 +13,8 @@ So here's this instead: a Claude Code plugin that uses regular Claude to do a be
 ## Installation
 
 ```
-/plugin install poor-mans-mythos
+/plugin marketplace add hanskhe/poor-mans-mythos
+/plugin install poor-mans-mythos@poor-mans-mythos
 ```
 
 ## Usage
