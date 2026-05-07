@@ -1,6 +1,6 @@
 {
   "name": "poor-mans-mythos",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Security audit skill that performs a full repo-wide security review using multi-agent analysis. Ranks all files by risk, spawns parallel review agents, and validates findings before producing a final report.",
   "author": {
     "name": "Hans Kristian Henriksen"

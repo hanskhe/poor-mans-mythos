@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "poor-mans-mythos",
-      "source": ".",
+      "source": "./",
       "description": "Security audit skill that performs a full repo-wide security review using multi-agent analysis."
     }
   ]
