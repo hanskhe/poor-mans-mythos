@@ -1,85 +1,104 @@
-# File Risk Rating Guide
+# File Classification Guide
 
-Assign each file a risk rating from 0 (no risk) to 5 (highest risk) based on its content.
-Rate based on what the file actually does, not just its extension or name.
+Phase 1 sorts every file into one of three buckets. The point is to narrow Phase 2's per-file pass to the files that matter, fast.
 
-## Rating Definitions
+Three buckets:
 
-### Risk 5 — Critical attack surface
-Files that directly handle untrusted input, authentication, authorization, cryptography,
-or execution of external commands. A vulnerability here is likely exploitable.
+- **review** — high-likelihood vuln surface. Each gets a Phase 2a agent.
+- **skim** — read for context but no dedicated agent. Phase 2b scenario agents may grep into them.
+- **skip** — out of scope (no vulns possible, generated, vendored, or otherwise irrelevant).
 
-Examples of what to look for:
-- Authentication and authorization logic (login, session creation, permission checks)
-- Cryptographic operations (hashing, encryption, key generation, signing)
-- SQL or NoSQL query construction, especially with any variable interpolation
-- Processing of user-supplied input (form data, query params, request bodies, file uploads)
-- API endpoint handlers that accept external requests
-- Payment processing or financial transaction logic
-- `exec`, `subprocess`, `eval`, `system`, shell invocation, or equivalent
-- Deserialization of data from external sources (JSON.parse of untrusted input, pickle.loads, etc.)
-- Redirect logic that uses user-supplied URLs
+When uncertain between two buckets, pick the higher one (review > skim > skip).
 
-### Risk 4 — Significant security configuration
-Files that configure security-relevant behavior or handle session/identity data.
-Vulnerabilities here are often exploitable with some context.
+---
 
-Examples:
-- Environment variable and secrets handling (reading, passing, logging of sensitive values)
-- Session and cookie configuration (flags, expiry, storage)
-- JWT creation, parsing, or validation
-- CORS, CSP, or other security header configuration
-- OAuth / SSO callback handling
-- Password reset flows
-- Rate limiting and brute-force protection configuration
-- Trust boundary definitions (what's internal vs external)
+## How to classify, fast
 
-### Risk 3 — Indirect data handling
-Files that process or transform data that may have originated externally,
-or that perform file I/O with paths that could be user-influenced.
+The cheap pass classifies most files by **path / extension / location alone** — no read needed. Read content only for files that survive the cheap pass and aren't yet decided.
 
-Examples:
-- Template rendering with any variable substitution
-- File read/write operations where the path or content could be influenced externally
-- XML, YAML, or other structured format parsing (potential XXE, YAML bomb, etc.)
-- Data serialization that includes user data
-- Logging that may capture request data
+### Skip — by path or name (no read needed)
 
-### Risk 2 — Low-exposure utilities
-Files that transform or process data but are insulated from direct external input.
-Vulnerabilities are possible but require a chain to exploit.
+- `*.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`, `Gemfile.lock`, `composer.lock`, `go.sum`.
+- `node_modules/**`, `vendor/**`, `.venv/**`, `venv/**`, `.git/**`, `dist/**`, `build/**`, `out/**`, `.next/**`, `target/**`, `coverage/**`, `.security-audit/**`.
+- `*.md`, `*.rst`, `*.txt`, `LICENSE*`, `CHANGELOG*` — documentation. (Exception: a README that documents auth flows can be useful in Phase 0; that's recon, not Phase 1.)
+- Static assets: `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.svg`, `*.ico`, `*.webp`, `*.woff`, `*.woff2`, `*.ttf`, `*.otf`, `*.mp4`, `*.mp3`, `*.pdf`.
+- Compiled / minified outputs: `*.min.js`, `*.min.css`, `*.map`, anything inside detected build directories.
+- Generated code marked with a "do not edit" header at the top — confirm with a header read only.
+- Binary files (detect with `file --mime-encoding <path>` returning `binary`).
 
-Examples:
-- Helper/utility functions that receive data from higher layers
-- Internal data transformation pipelines
-- Caching logic
-- Background job processors where input comes from internal queues
+### Skim — by path or name (no read needed)
 
-### Risk 1 — Minimal exposure
-Files with pure logic, no external data, and no security-sensitive operations.
+- Test files: `**/*.test.*`, `**/*.spec.*`, `**/test_*.py`, `**/__tests__/**`, `tests/**`, `spec/**`. Tests are not attack surface but document expected behavior — read in Phase 2b only when a scenario hits the code under test.
+- Build / tooling configs: `webpack.config.*`, `vite.config.*`, `babel.config.*`, `jest.config.*`, `tsconfig*.json`, `eslint*.config.*`, `prettier*`, `.editorconfig`. Skim the top of files like `next.config.*` and `nuxt.config.*` — they sometimes hide security headers or rewrites worth reviewing.
+- Translations / i18n bundles: `locales/**`, `i18n/**`, `*.po`, `*.pot`.
+- Type-only declaration files: `*.d.ts` with no implementation.
+- Documentation that contains snippets: `examples/**`, `docs/**` with code samples — only relevant if a scenario chases through them.
 
-Examples:
-- Pure computation functions
-- Data structure definitions
-- Type definitions and interfaces
-- Internal constants and enums
-- Configuration files for build tools (webpack, babel, etc.)
+### Review — by path or name (no read needed, default-promote)
 
-### Risk 0 — No security relevance
-Files that cannot contribute to a security vulnerability.
+These default to `review` because of their position in the application:
 
-Examples:
-- Static assets (images, fonts, compiled CSS)
-- Documentation files (.md, .txt, .rst)
-- Test fixtures and mock data
-- Lock files (package-lock.json, yarn.lock, Cargo.lock, poetry.lock)
-- Generated code that is never modified by hand
-- `.gitignore`, `.editorconfig`, `.prettierrc`, etc.
+- Anything identified as an **entry point in `recon.md`** (route handler, controller, webhook, queue consumer, CLI entry).
+- Authentication / authorization modules: paths matching `auth*`, `session*`, `jwt*`, `oauth*`, `login*`, `password*`, `permissions*`, `policy*`, `rbac*`, `acl*`, `middleware*`.
+- Cryptography modules: paths matching `crypto*`, `encrypt*`, `cipher*`, `hash*`, `signing*`, `tokens*`.
+- API / route definitions: `routes/**`, `controllers/**`, `handlers/**`, `endpoints/**`, `views/**` (when used for routing), `pages/api/**`, `app/api/**`.
+- Database / ORM access layers: `models/**`, `repositories/**`, `db/**`, `dao/**`, files with names like `queries.*`, `database.*`.
+- File upload handlers, deserializers, template renderers.
+- Manifests for dependency review: `package.json`, `requirements.txt`, `Pipfile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`. Reviewers inspect for unpinned versions and known-bad packages.
+- Infrastructure-as-code and container build files: `Dockerfile*`, `docker-compose*.yml`, `*.tf`, `*.tfvars`, `serverless.yml`, `cloudformation.yaml`, GitHub Actions workflows under `.github/workflows/**` (CI secrets, action pinning).
 
-## Rating Tips
+### Files needing a content read
 
-- When in doubt between two ratings, use the higher one.
-- A file with a single high-risk function earns the rating of that function, even if the rest is benign.
-- Comments describing security logic don't raise risk; actual implementation does.
-- Test files that test security logic are not themselves risk-5 (they don't run in production),
-  but they can be useful for understanding the attack surface — rate them 1.
+Anything not classified by the rules above. Read enough to decide:
+
+- Does the file handle untrusted input directly? → review.
+- Does it perform crypto, deserialization, shell-out, file I/O with user-influenced paths, template rendering with variables? → review.
+- Does it transform data that *might* have come from outside, but only via an internal pipeline? → skim.
+- Pure logic, types, constants, no external data, no I/O? → skim or skip depending on whether scenarios might reference it.
+
+A file with one risky function and ten benign ones is `review` — Phase 2a will focus on the risky part.
+
+---
+
+## Special cases
+
+- **Test files for security-relevant code**: `skim`, not `review`. They're not attack surface, but they document what the developers *think* is enforced — useful when a scenario needs to confirm whether a check exists at all. A reviewer who finds an authz check absent from production code can grep tests to see whether it was ever asserted.
+- **Vendored / third-party code committed to the repo**: skip unless the user explicitly includes it in scope. State this in `recon.md` "Out-of-scope".
+- **Generated clients** (OpenAPI / GraphQL codegen): skip the generated code, but `review` the generator config.
+- **Migrations** (`migrations/**`, `db/migrate/**`): usually `skim`. Promote to `review` if migrations contain raw SQL with embedded data, drop policies that disable RLS, or grant statements.
+- **Environment example files** (`.env.example`, `.env.sample`): `skim`. They reveal the secrets surface but typically contain placeholders.
+- **Secret-bearing files committed to the repo** (`.env`, `.env.local`, `.env.production`, `*.pem`, `*.key`, `id_rsa*`, `*.p12`, `*.pfx`, `*.jks`, `credentials.json`, `service-account*.json`): `review`. The reviewer agent will inspect contents and emit a finding if real values are present.
+- **Shell scripts** in `scripts/**`, `bin/**`: `review` if they execute user-influenced data, take CLI args, or run in CI with secrets; otherwise `skim`.
+
+---
+
+## Output
+
+Phase 1 writes `.security-audit/file-rankings.md`:
+
+```markdown
+# File Classification
+
+Generated: <ISO timestamp>
+Total files: <N>
+Review: <count> · Skim: <count> · Skip: <count>
+
+## Review (<count>)
+- <path> — <one-line reason>
+- ...
+
+## Skim (<count>)
+- <path> — <reason>
+- ...
+
+## Skip (<count>)
+<grouped — list rules applied, not every file. e.g. "node_modules/**: 4,219 files">
+```
+
+After writing, ask the user how many `Review` files to cover in Phase 2a. Default = all. The `Skim` and `Skip` lists are not user-prompted — they're informational for traceability.
+
+---
+
+## What this guide does *not* do
+
+It does not assign severity. It does not predict findings. It only sorts files by the cost/value of dedicating a reviewer agent to them. Severity is set in Phase 2 against `severity-rubric.md`.
