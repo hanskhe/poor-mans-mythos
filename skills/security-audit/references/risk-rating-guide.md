@@ -14,7 +14,11 @@ When uncertain between two buckets, pick the higher one (review > skim > skip).
 
 ## How to classify, fast
 
-The cheap pass classifies most files by **path / extension / location alone** — no read needed. Read content only for files that survive the cheap pass and aren't yet decided.
+The cheap pass classifies most files by **path / extension / location alone**, with no read needed. `scripts/classify.sh scan` implements the path rules below; keep the two in sync when changing either. The script then greps the files no rule matched for risky primitives (shell-outs, eval, deserialization, SQL, request objects, outbound HTTP, file I/O, secrets, crypto, sessions). Files with no hits default to `skim`. Files with hits are listed for the orchestrator to decide, together with the primitives seen.
+
+The orchestrator decides those listed files (see "Files needing a decision") and records every decision or correction in `.security-audit/class-overrides.tsv`: one `bucket<TAB>path<TAB>reason` line per file, where bucket is `review`, `skim` or `skip`. Overrides win over every rule. Use them to demote out-of-scope or vendored code, to promote a file the rules under-rated, and for the special cases below that need judgment.
+
+`classify.sh finalize` then promotes every file mentioned in `recon.md` (outside its Out-of-scope section) to `review`. Any listed file the orchestrator didn't decide is defaulted up to `review`.
 
 ### Skip — by path or name (no read needed)
 
@@ -23,8 +27,8 @@ The cheap pass classifies most files by **path / extension / location alone** �
 - `*.md`, `*.rst`, `*.txt`, `LICENSE*`, `CHANGELOG*` — documentation. (Exception: a README that documents auth flows can be useful in Phase 0; that's recon, not Phase 1.)
 - Static assets: `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.svg`, `*.ico`, `*.webp`, `*.woff`, `*.woff2`, `*.ttf`, `*.otf`, `*.mp4`, `*.mp3`, `*.pdf`.
 - Compiled / minified outputs: `*.min.js`, `*.min.css`, `*.map`, anything inside detected build directories.
-- Generated code marked with a "do not edit" header at the top — confirm with a header read only.
-- Binary files (detect with `file --mime-encoding <path>` returning `binary`).
+- Generated code marked with a "do not edit" header at the top. Not scripted; skip by override when you notice it.
+- Binary and empty files (the script detects them with `grep -I`).
 
 ### Skim — by path or name (no read needed)
 
@@ -47,9 +51,9 @@ These default to `review` because of their position in the application:
 - Manifests for dependency review: `package.json`, `requirements.txt`, `Pipfile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`. Reviewers inspect for unpinned versions and known-bad packages.
 - Infrastructure-as-code and container build files: `Dockerfile*`, `docker-compose*.yml`, `*.tf`, `*.tfvars`, `serverless.yml`, `cloudformation.yaml`, GitHub Actions workflows under `.github/workflows/**` (CI secrets, action pinning).
 
-### Files needing a content read
+### Files needing a decision
 
-Anything not classified by the rules above. Read enough to decide:
+Files no path rule matched but that mention risky primitives. Decide most of them from the path plus the primitives listed. When that isn't enough, look at the top of the file: `head -n 30` for several files in one Bash call. Avoid reading whole files into the orchestrator's context. Decide:
 
 - Does the file handle untrusted input directly? → review.
 - Does it perform crypto, deserialization, shell-out, file I/O with user-influenced paths, template rendering with variables? → review.
@@ -65,37 +69,22 @@ A file with one risky function and ten benign ones is `review` — Phase 2a will
 - **Test files for security-relevant code**: `skim`, not `review`. They're not attack surface, but they document what the developers *think* is enforced — useful when a scenario needs to confirm whether a check exists at all. A reviewer who finds an authz check absent from production code can grep tests to see whether it was ever asserted.
 - **Vendored / third-party code committed to the repo**: skip unless the user explicitly includes it in scope. State this in `recon.md` "Out-of-scope".
 - **Generated clients** (OpenAPI / GraphQL codegen): skip the generated code, but `review` the generator config.
-- **Migrations** (`migrations/**`, `db/migrate/**`): usually `skim`. Promote to `review` if migrations contain raw SQL with embedded data, drop policies that disable RLS, or grant statements.
+- **Migrations** (`migrations/**`, `db/migrate/**`): usually `skim`. The script promotes migrations that grant privileges or touch row-level security or policies. Promote others by override if they contain raw SQL with embedded data.
 - **Environment example files** (`.env.example`, `.env.sample`): `skim`. They reveal the secrets surface but typically contain placeholders.
 - **Secret-bearing files committed to the repo** (`.env`, `.env.local`, `.env.production`, `*.pem`, `*.key`, `id_rsa*`, `*.p12`, `*.pfx`, `*.jks`, `credentials.json`, `service-account*.json`): `review`. The reviewer agent will inspect contents and emit a finding if real values are present.
-- **Shell scripts** in `scripts/**`, `bin/**`: `review` if they execute user-influenced data, take CLI args, or run in CI with secrets; otherwise `skim`.
+- **Shell scripts** in `scripts/**`, `bin/**`: `review` if they execute user-influenced data, take CLI args, or run in CI with secrets; otherwise `skim`. No path rule covers them, so they appear in the decision list when they contain any signal.
+- **Build configs that may hide security settings** (`next.config.*`, `nuxt.config.*`): no path rule covers them. Promote by override if they set headers, rewrites, or CSP.
 
 ---
 
 ## Output
 
-Phase 1 writes `.security-audit/file-rankings.md`:
+`classify.sh finalize` writes:
 
-```markdown
-# File Classification
+- `.security-audit/file-classes.tsv`: `bucket<TAB>priority<TAB>path<TAB>reason`, the machine-readable result. Lower priority numbers are reviewed first in Phase 2a: files referenced in recon.md come first, then secret-bearing files, auth, routes, crypto, data access, infrastructure, undecided files, and manifests last.
+- `.security-audit/file-rankings.md`: the human-readable listing. The Review and Skim sections are listed in full; Skip is grouped by rule.
 
-Generated: <ISO timestamp>
-Total files: <N>
-Review: <count> · Skim: <count> · Skip: <count>
-
-## Review (<count>)
-- <path> — <one-line reason>
-- ...
-
-## Skim (<count>)
-- <path> — <reason>
-- ...
-
-## Skip (<count>)
-<grouped — list rules applied, not every file. e.g. "node_modules/**: 4,219 files">
-```
-
-After writing, ask the user how many `Review` files to cover in Phase 2a. Default = all. The `Skim` and `Skip` lists are not user-prompted — they're informational for traceability.
+The orchestrator then asks the user how many `Review` files to cover in Phase 2a (default: all), and `classify.sh select N` takes the top N in priority order.
 
 ---
 

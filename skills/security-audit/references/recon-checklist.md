@@ -1,6 +1,6 @@
 # Reconnaissance Checklist (Phase 0)
 
-Phase 0 establishes the project context that every later phase depends on. The output is a single file, `.security-audit/recon.md`, that is loaded into the prompt of every reviewer and validator agent.
+Phase 0 establishes the project context that every later phase depends on. The output is a single file, `.security-audit/recon.md`, that every reviewer, scenario and validator agent reads first. It is the shared map that keeps dozens of agents from rediscovering the same structure on their own.
 
 Goal: a reviewer agent that opens `recon.md` should know, in under one minute of reading, what kind of application this is, what protects it, and where attackers will aim.
 
@@ -8,7 +8,9 @@ Goal: a reviewer agent that opens `recon.md` should know, in under one minute of
 
 ## Required output sections
 
-`recon.md` must contain these sections, in this order. Every section must be filled — write `Unknown` rather than skipping.
+`recon.md` must contain these sections, in this order, as `## <n>. <Title>` headings (scripts look up the Out-of-scope section and the file paths mentioned in the document). Fill every section; write `Unknown` rather than skipping one.
+
+Write repo-relative file paths exactly as they appear in the repository, e.g. `src/routes/users.py`. Phase 1 promotes every file that recon.md mentions, outside the Out-of-scope section, to the Review bucket.
 
 ### 1. One-line description
 
@@ -41,6 +43,22 @@ A flat list of every place external input enters the system. For each, give path
 - File upload endpoints.
 
 This list is the single most useful artifact for Phase 2b. Be thorough.
+
+### 4a. Route map
+
+One table covering every HTTP route. Build it once here, so the scenario agents (S2, S3 and S5 especially) and the per-file reviewers don't each re-derive the routing and middleware chain.
+
+| Method | Path | Handler (file:line) | Auth / guards applied | Role or ownership check | Notes |
+|---|---|---|---|---|---|
+| GET | /api/invoices/:id | src/routes/invoices.py:42 | `require_login` (app-level, src/app.py:18) | none seen | |
+| DELETE | /admin/users/:id | src/routes/admin.py:77 | `require_login`, `require_admin` | role: admin | |
+| POST | /webhooks/stripe | src/routes/hooks.py:12 | none (public) | signature check? | |
+
+How to build it:
+- Resolve the full path, including router prefixes and mounts, and record which middleware actually applies at that point in the registration order.
+- Record what you see, not what should be there. Write `none` when no guard applies and `?` when you can't tell without deeper tracing. Don't guess; downstream agents verify the entries they rely on.
+- For very large apps (more than ~150 routes), group routes that share a router and guard chain into one row (e.g. `GET,POST /api/projects/*`), but list every route that has its own guard or no guard individually.
+- No HTTP surface: write `No HTTP routes.`
 
 ### 5. Outbound surface
 
@@ -76,7 +94,7 @@ Anything the user explicitly excluded, plus any vendored / generated code the au
 
 Work in this order:
 
-1. **Read project markers** in parallel: `README*`, `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`, `Dockerfile`, `docker-compose*.yml`, `.github/workflows/*`, top-level config (`next.config.*`, `nuxt.config.*`, `vite.config.*`, `webpack.config.*`).
+1. **Read project markers** in parallel: `README*`, `CLAUDE.md` / `AGENTS.md` (agents don't load these themselves; carry anything security-relevant into recon.md), `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`, `Dockerfile`, `docker-compose*.yml`, `.github/workflows/*`, top-level config (`next.config.*`, `nuxt.config.*`, `vite.config.*`, `webpack.config.*`).
 2. **Detect framework conventions** from imports / file structure (e.g. Express `app.use`, Django `urls.py`, Rails `routes.rb`, FastAPI `@app.get`, NestJS controllers, Next.js `app/` or `pages/`).
 3. **Map routes** by grepping for the framework's routing primitives. Examples:
    - Express: `\.(get|post|put|patch|delete|all)\(['\"]`
@@ -84,9 +102,10 @@ Work in this order:
    - Django: file `urls.py` and `urlpatterns`
    - Rails: `config/routes.rb`
    - Spring: `@(Get|Post|Put|Delete|Request)Mapping`
-4. **Locate auth enforcement.** Grep for: `middleware`, `before_action`, `@login_required`, `requireAuth`, `verifyJWT`, `passport.authenticate`, `current_user`, `IsAuthenticated`, `Authorize`. Identify the file that owns the check.
-5. **Find outbound HTTP calls.** Grep for HTTP client usage in the project's language: `requests.`, `httpx.`, `fetch(`, `axios.`, `http.Get`, `HttpClient`, `urllib`, `Net::HTTP`.
-6. **Run the threat-model dialog** (next section) for what couldn't be inferred.
+4. **Build the route map** (section 4a) while you're in the routing code.
+5. **Locate auth enforcement.** Grep for: `middleware`, `before_action`, `@login_required`, `requireAuth`, `verifyJWT`, `passport.authenticate`, `current_user`, `IsAuthenticated`, `Authorize`. Identify the file that owns the check.
+6. **Find outbound HTTP calls.** Grep for HTTP client usage in the project's language: `requests.`, `httpx.`, `fetch(`, `axios.`, `http.Get`, `HttpClient`, `urllib`, `Net::HTTP`.
+7. **Run the threat-model dialog** (next section) for what couldn't be inferred.
 
 ---
 
@@ -120,3 +139,4 @@ If the README answers a question already, do not re-ask it. State the inferred a
 - **Don't paraphrase OWASP.** Don't restate the categories. Reference them by code only when listing entry points or trust boundaries that map to a category.
 - **Don't speculate about vulns yet.** Phase 0 builds the map. Phase 2 finds the bugs. Discipline matters — speculation in `recon.md` biases later agents.
 - **Don't truncate the entry-point list.** A missed route is a missed audit.
+- **Don't read whole files to build the map.** Grep for the routing and middleware primitives with `-n`, and read only the registration sites. recon.md is built in the orchestrator's context, which carries everything read here for the rest of the audit.
