@@ -1,0 +1,83 @@
+# Data behind the audit scripts. Keep in sync with references/risk-rating-guide.md
+# and references/finding-format.md.
+
+# Path rules: the first rule with a matching pattern wins. Patterns use .gitignore
+# syntax (a pattern without "/" matches a file or directory name at any depth)
+# and are matched against the lowercased path.
+rules:
+  - [skip, 99, vendored / build output,
+     [node_modules/, vendor/, .venv/, venv/, dist/, build/, out/, .next/, target/, coverage/,
+      .security-audit/, __pycache__/, bower_components/]]
+  - [skip, 99, lockfile, ["*.lock", package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml, go.sum]]
+  - [skim, 50, env example (secrets surface), [.env.example, .env.sample, .env.template, .env.dist]]
+  - [review, 2, secret-bearing file,
+     [.env, .env.*, "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "id_rsa*", "id_dsa*",
+      "id_ecdsa*", "id_ed25519*", credentials.json, .npmrc, .pypirc, .htpasswd, .netrc, "service-account*.json"]]
+  - [review, 9, dependency manifest,
+     [package.json, "requirements*.txt", pipfile, pyproject.toml, cargo.toml, go.mod, gemfile,
+      composer.json, pom.xml, build.gradle, build.gradle.kts]]
+  - [review, 7, infrastructure / CI definition,
+     ["dockerfile*", "compose*.y*ml", "docker-compose*.y*ml", "*.tf", "*.tfvars", serverless.y*ml,
+      "cloudformation*.y*ml", "cloudformation*.json", .gitlab-ci.yml, "/.github/workflows/**/*.y*ml"]]
+  - [skip, 99, documentation,
+     ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc", "license*", "licence*", "copying*", "changelog*",
+      "authors*", "contributors*", "notice*"]]
+  - [skip, 99, static asset / binary,
+     ["*.png", "*.jp*g", "*.gif", "*.svg", "*.ico", "*.webp", "*.bmp", "*.tif*", "*.woff*", "*.ttf", "*.otf",
+      "*.eot", "*.mp[34]", "*.wav", "*.ogg", "*.webm", "*.mov", "*.pdf", "*.zip", "*.gz", "*.tgz", "*.jar",
+      "*.class", "*.pyc", "*.so", "*.dylib", "*.dll", "*.exe", "*.wasm"]]
+  - [skip, 99, minified / source map, ["*.min.js", "*.min.css", "*.map"]]
+  - [skim, 50, test,
+     [test/, tests/, spec/, specs/, __tests__/, __mocks__/, testdata/, fixtures/, e2e/, "*.test.*",
+      "*.spec.*", "test_*.py", "*_test.go", "*_test.py", "*_test.rb", "*_test.ex", "*_test.exs", conftest.py]]
+  - [skim, 50, i18n, [locale/, locales/, i18n/, translations/, lang/, "*.po", "*.pot", "*.mo"]]
+  - [skim, 50, type declarations, ["*.d.ts"]]
+  - [skim, 50, examples / docs code, [example/, examples/, doc/, docs/, sample/, samples/]]
+  - [skim, 50, migration, [migrations/, migrate/]]
+  - [skim, 50, build / tooling config,
+     ["webpack.config.*", "vite.config.*", "babel.config.*", "jest.config.*", "vitest.config.*",
+      "rollup.config.*", "postcss.config.*", "tailwind.config.*", "karma.config.*", "playwright.config.*",
+      "cypress.config.*", "tsconfig*.json", "eslint*", ".eslint*", "prettier*", ".prettier*", .editorconfig,
+      .gitignore, .gitattributes, .dockerignore, .nvmrc, .python-version]]
+  - [skim, 50, stylesheet, ["*.css", "*.scss", "*.sass", "*.less", "*.styl"]]
+  - [review, 3, auth / access-control module,
+     ["auth*", "session*", "jwt*", "oauth*", "login*", "logout*", "signin*", "signup*", "password*",
+      "permission*", "polic*", "rbac*", "acl*", "middleware*", "guard*"]]
+  - [review, 4, route / handler,
+     [routes/, router/, routers/, controllers/, handlers/, endpoints/, views/, resolvers/,
+      "**/pages/api/", "**/app/api/"]]
+  - [review, 5, crypto / token module,
+     ["crypto*", "encrypt*", "decrypt*", "cipher*", "hash*", "signing*", "signature*", "token*"]]
+  - [review, 6, data-access layer,
+     [models/, repositories/, repository/, db/, dao/, database/, "queries.*", "database.*", "db.*"]]
+  - [review, 6, upload / (de)serialization / templating,
+     ["*upload*", "*serializ*", "*unmarshal*", "*template*", "*render*"]]
+
+# Classifications the scripts make beyond the path rules.
+scripted:
+  undecided:  [decide, 0, ""]
+  binary:     [skip, 99, binary or empty]
+  migration:  [review, 6, migration with grants / RLS / policies]
+  no_signals: [skim, 50, no risky-primitive signal (scripted)]
+  in_recon:   [review, 1, referenced in recon.md (entry point / auth / outbound)]
+  defaulted:  [review, 8]
+override_priority: {review: 5, skim: 50, skip: 99}
+
+# Undecided files are grepped for these (case-insensitive regexes).
+signals: ['exec\(', execsync, 'spawn\(', 'system\(', popen, subprocess, shell_exec, 'eval\(', new function,
+  pickle, unserialize, 'marshal\.load', 'yaml\.load', deserializ, readobject, innerhtml,
+  dangerouslysetinnerhtml, render_template, '\.raw\(', '\.query\(', '\.execute\(', 'select ', insert into,
+  delete from, 'req\.', 'request\.', '\$_(?:get|post|request|cookie|files)', 'fetch\(', axios, 'requests\.',
+  httpx, urlopen, 'http\.get', readfile, writefile, sendfile, upload, password, passwd, secret, token,
+  'api_?key', 'private_?key', crypto, cipher, hmac, md5, sha1, random, jwt, cookie, session, redirect, cors,
+  csrf, 'authori[sz]', permission, 'is_?admin']
+risky_migration: ['grant ', row level security, create policy, drop policy, security definer, disable trigger]
+
+# Findings (finding-format.md).
+severities: [Unrated, Low, Medium, High, Critical]
+confidences: [Unrated, Low, Medium, High]
+statuses: {confirm: confirmed, 'false': false positive, down: downgraded, up: upgraded, dup: duplicate}
+real_statuses: [confirmed, upgraded, downgraded]
+
+# Reference files staged into .security-audit/work/refs/ for the subagents.
+staged_refs: [owasp-top10.md, owasp-api-top10.md, severity-rubric.md, finding-format.md]

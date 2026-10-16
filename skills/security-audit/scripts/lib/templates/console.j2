@@ -1,0 +1,89 @@
+{# What each audit.py step prints for the orchestrator: one macro per step. #}
+
+{% macro init(cleared, scenarios) %}
+{% if cleared %}
+Cleared the previous run's working state ({{ W }}); earlier reports are kept.
+{% endif %}
+Workspace ready: {{ W }} (refs staged, {{ scenarios|length }} scenarios)
+{% for s in scenarios|rows %}
+{{ s.id }}	{{ s.name }}
+{% endfor %}
+{% endmacro %}
+
+{% macro scan(df) %}
+{% set n, undecided = df.bucket.value_counts(), df|where(bucket="decide") %}
+Files: {{ df|length }}  review {{ n.get("review", 0) }} · skim {{ n.get("skim", 0) }} · skip {{ n.get("skip", 0) }} · needs decision {{ undecided|length }}
+{% if undecided|length %}
+
+Needs decision (path <TAB> risky primitives seen):
+{% for f in undecided|rows(200) %}
+{{ f.path }}	{{ f.reason|replace("signals: ", "") }}
+{% endfor %}
+{% if undecided|length > 200 %}
+... {{ undecided|length - 200 }} more: grep '^decide' {{ W }}/file-classes.base.tsv
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro finalize(groups, promoted, overrides, defaulted) %}
+{% if promoted %}Promoted from recon.md: {{ promoted }}
+{% endif %}
+{% if overrides %}Overrides applied: {{ overrides }}
+{% endif %}
+{% if defaulted %}WARNING: {{ defaulted }} undecided files defaulted to review
+{% endif %}
+Total files: {{ groups.values()|map("length")|sum }}  Review {{ groups.review|length }} · Skim {{ groups.skim|length }} · Skip {{ groups.skip|length }}
+
+Review files, in Phase 2a priority order:
+{% for f in groups.review|rows(30) %}
+{{ "%3d"|format(loop.index) }}. {{ f.path }} — {{ f.reason }}
+{% endfor %}
+{% if groups.review|length > 30 %}
+... and {{ groups.review|length - 30 }} more (see {{ A }}/file-rankings.md)
+{% endif %}
+{% endmacro %}
+
+{% macro select(chosen) %}
+Phase 2a: {{ chosen|length }} files (path <TAB> output file):
+{% for f in chosen|rows %}
+{{ f.path }}	{{ f.output }}
+{% endfor %}
+{% endmacro %}
+
+{% macro collect(raw, kept, invalid, missing) %}
+{% set by_source = raw.source.str[:2].value_counts() %}
+Phase 2 complete. Per-file pass: {{ by_source.get("2a", 0) }} findings. Scenario pass: {{ by_source.get("2b", 0) }} findings. After dedup: {{ kept|length }}.
+Severity breakdown:{% for s in range(4, -1, -1) if s or kept|where(sev=0)|length %} {{ severities[s] }} {{ kept|where(sev=s)|length }}{{ "," if not loop.last }}{% endfor %}
+
+{% for path in invalid %}
+UNPARSEABLE (not the YAML that finding-format.md specifies): {{ path }}
+{% endfor %}
+{% for path in missing %}
+MISSING (agent failed or never wrote it): {{ path }}
+{% endfor %}
+{% endmacro %}
+
+{% macro cluster(found) %}
+Validating {{ found.ids.str.split(",").explode()|length }} findings in {{ found|length }} clusters (cluster <TAB> input <TAB> output <TAB> label):
+{% for c in found|rows %}
+{{ c.cluster }}	{{ W }}/clusters/{{ c.cluster }}.yaml	{{ W }}/validated/{{ c.cluster }}.yaml	{{ c.label }} [{{ c.ids }}]
+{% endfor %}
+{% endmacro %}
+
+{% macro report(path, f, raw, repeated) %}
+{% set real = f|where(real=True) %}
+Security audit complete. Report saved to {{ path }}.
+Confirmed:{% for s in range(4, 0, -1) %} {{ real|where(adjusted=s)|length }} {{ severities[s] }}{{ "," if not loop.last else "." }}{% endfor %}
+
+{{ f|where(status="false positive")|length }} dismissed as false positives. {{ f|where(status="duplicate")|length }} marked duplicate during validation ({{ raw|length - f|length }} raw findings were merged before validation). {{ f|where(pending=True)|length }} not validated.
+{% for c in real|where(adjusted=4)|rows %}
+{{ "\nCRITICAL:\n" if loop.first }}- [{{ c.id }}] {{ c.title }} — `{{ c.file }}{{ ":" ~ c.lines if c.lines }}`
+{% endfor %}
+{% for label, ids in [("no verdict for", (f|where(status="missing")).id), ("unrecognized status for", (f|where(unclear=True)).id), ("more than one verdict (last one used) for", repeated)] if ids|length %}
+WARNING: {{ label }}: {{ ids|join(" ") }}
+{% endfor %}
+{% endmacro %}
+
+{% macro clean(kept) %}
+Removed the working state ({{ W }}). Kept in {{ A }}: {{ kept|join(", ") or "nothing" }}
+{% endmacro %}

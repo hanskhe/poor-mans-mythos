@@ -14,11 +14,11 @@ When uncertain between two buckets, pick the higher one (review > skim > skip).
 
 ## How to classify, fast
 
-The cheap pass classifies most files by **path / extension / location alone**, with no read needed. `scripts/classify.sh scan` implements the path rules below; keep the two in sync when changing either. The script then greps the files no rule matched for risky primitives (shell-outs, eval, deserialization, SQL, request objects, outbound HTTP, file I/O, secrets, crypto, sessions). Files with no hits default to `skim`. Files with hits are listed for the orchestrator to decide, together with the primitives seen.
+The cheap pass classifies most files by **path / extension / location alone**, with no read needed. `scripts/audit.py scan` implements the path rules below (they live in `scripts/lib/config.yaml`); keep the two in sync when changing either. The script then greps the files no rule matched for risky primitives (shell-outs, eval, deserialization, SQL, request objects, outbound HTTP, file I/O, secrets, crypto, sessions). Files with no hits default to `skim`. Files with hits are listed for the orchestrator to decide, together with the primitives seen.
 
-The orchestrator decides those listed files (see "Files needing a decision") and records every decision or correction in `.security-audit/class-overrides.tsv`: one `bucket<TAB>path<TAB>reason` line per file, where bucket is `review`, `skim` or `skip`. Overrides win over every rule. Use them to demote out-of-scope or vendored code, to promote a file the rules under-rated, and for the special cases below that need judgment.
+The orchestrator decides those listed files (see "Files needing a decision") and records every decision or correction in `.security-audit/work/class-overrides.tsv`: one `bucket<TAB>path<TAB>reason` line per file, where bucket is `review`, `skim` or `skip`. Overrides win over every rule. Use them to demote out-of-scope or vendored code, to promote a file the rules under-rated, and for the special cases below that need judgment.
 
-`classify.sh finalize` then promotes every file mentioned in `recon.md` (outside its Out-of-scope section) to `review`. Any listed file the orchestrator didn't decide is defaulted up to `review`.
+`audit.py finalize` then promotes every file mentioned in `recon.md` (outside its Out-of-scope section) to `review`. Any listed file the orchestrator didn't decide is defaulted up to `review`.
 
 ### Skip — by path or name (no read needed)
 
@@ -79,12 +79,12 @@ A file with one risky function and ten benign ones is `review` — Phase 2a will
 
 ## Output
 
-`classify.sh finalize` writes:
+`audit.py finalize` writes:
 
-- `.security-audit/file-classes.tsv`: `bucket<TAB>priority<TAB>path<TAB>reason`, the machine-readable result. Lower priority numbers are reviewed first in Phase 2a: files referenced in recon.md come first, then secret-bearing files, auth, routes, crypto, data access, infrastructure, undecided files, and manifests last.
+- `.security-audit/work/file-classes.tsv`: `bucket<TAB>priority<TAB>path<TAB>reason`, the machine-readable result. Lower priority numbers are reviewed first in Phase 2a: files referenced in recon.md come first, then secret-bearing files, auth, routes, crypto, data access, infrastructure, undecided files, and manifests last.
 - `.security-audit/file-rankings.md`: the human-readable listing. The Review and Skim sections are listed in full; Skip is grouped by rule.
 
-The orchestrator then asks the user how many `Review` files to cover in Phase 2a (default: all), and `classify.sh select N` takes the top N in priority order.
+The orchestrator then asks the user how many `Review` files to cover in Phase 2a (default: all), and `audit.py select N` takes the top N in priority order.
 
 ---
 

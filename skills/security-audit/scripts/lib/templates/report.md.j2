@@ -1,0 +1,174 @@
+{% macro loc(f) %}`{{ f.file }}{{ ":" ~ f.lines if f.lines }}`{% endmacro %}
+{% macro table(rows, header) %}
+{% if rows|length %}
+| {{ header|join(" | ") }} |
+|{{ "---|" * header|length }}
+{% for row in rows|rows %}
+| {{ caller(row) }} |
+{% endfor %}
+{% else %}
+_None._
+{% endif %}
+{% endmacro %}
+{% macro finding(f) %}
+#### [{{ f.id }}] {{ f.title }}
+- **File:** {{ loc(f) }}
+- **OWASP:** {{ f.owasp }} · **CWE:** {{ f.cwe }}
+- **Severity:** {{ severities[f.adjusted] }}{{ " (was: %s)"|format(severities[f.sev]) if f.rerated }} · **Confidence:** {{ f.confidence }} · **Status:** {{ f.status }}
+- **Found by:** {{ f.source }}
+
+```
+{{ f.excerpt.rstrip() }}
+```
+
+**Detail:** {{ f.detail }}
+
+**Data flow:** {{ f.dataflow }}
+
+**Validation:** {{ f.reasoning }}
+
+**Fix:** {{ f.fix }}
+
+{% endmacro %}
+{% macro coverage(h) %}
+{% set real = f|where(real=True) %}
+{{ h }} Scenarios
+
+{% call(s) table(scenarios, ["Scenario", "Findings raised", "Confirmed", "Notes"]) %}{{ s.id }} {{ s.name|cell }} | {{ s.raised if s.ran else "—" }} | {{ s.confirmed if s.ran else "—" }} | {{ s.notes|cell if s.ran else "**No output: the scenario agent did not complete.**" }}{% endcall %}
+
+{{ h }} Which pass found what
+
+{% set everyone, confirmed = f.found_by.value_counts(), real.found_by.value_counts() %}
+| Found by | Confirmed | All merged findings |
+|---|---|---|
+{% for key in ["2a", "2b", "2a + 2b"] %}
+| {{ key }} | {{ confirmed.get(key, 0) }} | {{ everyone.get(key, 0) }} |
+{% endfor %}
+{% for list, rows in owasp.groupby(["list", "year"], sort=False) %}
+
+{{ h }} {{ list[0] }} ({{ list[1] }})
+
+{% call(c) table(rows, ["Category", "Findings", "Confirmed", "Scenarios (designed for / raised here)"]) %}{{ c.key }} {{ c.name }} | {{ c.raised }} | {{ c.confirmed }} | {{ c.scenarios }}{% endcall %}
+{% endfor %}
+
+Findings outside both lists: {{ f|where(group="NA")|length }} ({{ real|where(group="NA")|length }} confirmed).
+
+{{ h }} Coverage gaps
+
+{% if uncovered|length %}
+- **Review files not covered by the per-file pass** (the top {{ phase2a|length }} were reviewed): {{ uncovered|length }}. Scenario agents still searched across them.
+{% for u in uncovered|rows %}
+  - `{{ u.path }}` — {{ u.reason }}
+{% endfor %}
+{% endif %}
+{% for label, items in [("Per-file agents that produced no output", no_output.output), ("Selected for validation but no verdict returned", (f|where(status="missing")).id), ("Unrecognized validation status", (f|where(unclear=True)).id), ("Not validated (user truncation)", (f|where(status="not selected")).id), ("Scenarios with zero findings (judge from the notes how confident that zero is)", (scenarios|where(ran=True, raised=0)).id)] if items|length %}
+- **{{ label }}:** {{ items|join(", ") }}
+{% endfor %}
+{% set buckets = classes.bucket.value_counts() %}
+- **Skim ({{ buckets.get("skim", 0) }}) and Skip ({{ buckets.get("skip", 0) }}) files** got no dedicated reviewer. See `{{ A }}/file-rankings.md`.
+
+{{ h }} Out of scope
+
+{{ out_of_scope.strip() or "_Not recorded in recon.md._" }}
+
+{{ h }} Known limitations
+
+- Static reading only. Behavior that emerges only at runtime (config pulled from a secret store, feature flags) is not exercised.
+- No dependency CVE matching; manifests are only checked for risky patterns (unpinned versions, suspicious packages).
+- No dynamic analysis, fuzzing, or live exploitation.
+- Physical attacks and social engineering are out of scope for this audit.
+{% endmacro %}
+{% set real, pending = f|where(real=True), f|where(pending=True) %}
+{% set false_positives, duplicates = f|where(status="false positive"), f|where(status="duplicate") %}
+{% set buckets, by_source = classes.bucket.value_counts(), raw.source.str[:2].value_counts() %}
+# Security Audit Report
+
+**Repository:** {{ repo }}\
+**Date:** {{ date }}\
+**Stack:** {{ stack }}\
+**Files classified:** {{ classes|length }} (Review {{ buckets.get("review", 0) }} · Skim {{ buckets.get("skim", 0) }} · Skip {{ buckets.get("skip", 0) }})\
+**Files reviewed in Phase 2a:** {{ phase2a|length }} of {{ buckets.get("review", 0) }} Review files\
+**Findings raised:** {{ raw|length }} (2a: {{ by_source.get("2a", 0) }}, 2b: {{ by_source.get("2b", 0) }}), {{ f|length }} after deduplication\
+**Findings validated:** {{ f|length - pending|length }} of {{ selected }} selected\
+**Findings confirmed:** {{ real|length }}
+
+---
+
+## Executive Summary
+
+| Severity | Confirmed | of which re-rated | False positives | Duplicates | Not validated |
+|---|---|---|---|---|---|
+{% for s in range(4, 0, -1) %}
+| {{ severities[s] }} | {{ real|where(adjusted=s)|length }} | {{ real|where(adjusted=s, rerated=True)|length }} | {{ false_positives|where(sev=s)|length }} | {{ duplicates|where(sev=s)|length }} | {{ pending|where(sev=s)|length }} |
+{% endfor %}
+| **Total** | **{{ real|length }}** | **{{ real|where(rerated=True)|length }}** | **{{ false_positives|length }}** | **{{ duplicates|length }}** | **{{ pending|length }}** |
+
+Confirmed findings are counted at their validated severity; the others at the severity they were raised with.
+{% for c in real|where(adjusted=4)|rows %}
+{{ "\n**Critical findings:**\n\n" if loop.first }}- [{{ c.id }}] {{ c.title }} — {{ loc(c) }}
+{% endfor %}
+
+---
+
+## Confirmed Findings
+{% for s in range(4, -1, -1) if s or real|where(adjusted=0)|length %}
+
+### {{ severities[s] }}
+
+{% for f in real|where(adjusted=s)|rows %}
+{{ finding(f) }}
+{%- else %}
+_None._
+{% endfor %}
+{% endfor %}
+
+---
+
+## Adjusted Findings (severity changed during validation)
+
+{% call(f) table(real|where(rerated=True), ["ID", "Title", "File", "Original → Adjusted", "Why"]) %}{{ f.id }} | {{ f.title|cell }} | {{ loc(f) }} | {{ severities[f.sev] }} → {{ severities[f.adjusted] }} | {{ f.reasoning|cell }}{% endcall %}
+
+## False Positives
+
+{% call(f) table(false_positives, ["ID", "File", "Issue", "Reason dismissed"]) %}{{ f.id }} | {{ loc(f) }} | {{ f.title|cell }} | {{ f.reasoning|cell }}{% endcall %}
+
+## Duplicates found during validation
+
+{% call(f) table(duplicates, ["ID", "Title", "Duplicate of"]) %}{{ f.id }} | {{ f.title|cell }} | {{ f.duplicate_of }}{% endcall %}
+
+## Not Validated
+
+{% call(f) table(pending, ["ID", "Raised severity", "Title", "File", "Why"]) %}{{ f.id }} | {{ severities[f.sev] }} | {{ f.title|cell }} | {{ loc(f) }} | {{ "validator returned no verdict" if f.status == "missing" else "not selected for validation" }}{% endcall %}
+{% if pending|length %}
+
+Full details of these findings are in `{{ W }}/findings.yaml` until `audit.py clean` removes it.
+{% endif %}
+
+---
+
+## Auditor Notes
+
+_None._
+
+---
+
+## Coverage
+
+{{ coverage("###") }}
+
+---
+
+## Token Usage (subagents)
+
+{% if usage|length %}
+| Phase | Agents | Total tokens | Avg per agent | Tool uses |
+|---|---|---|---|---|
+{% for phase, u in usage.iterrows() %}
+| {{ phase }} | {{ u.agents }} | {{ "{:,.0f}".format(u.total) }} | {{ "{:,.0f}".format(u.average) if u.average == u.average else "—" }} | {{ u.tools|int }} |
+{% endfor %}
+| **Total** | **{{ usage.agents.sum() }}** | **{{ "{:,.0f}".format(usage.total.sum()) }}** | | |
+
+The orchestrating session's own usage is not included (see `/cost`).
+{% else %}
+_Not recorded._
+{% endif %}

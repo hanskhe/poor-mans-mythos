@@ -2,7 +2,7 @@
 
 Phase 2a reviews files. Phase 2b reviews **questions** — the kind an attacker would ask. Each scenario below is a prompt for a single agent that runs Grep across the whole repo, follows leads, and reports findings in the standard format (`finding-format.md`).
 
-Each scenario runs in a `scenario-runner` agent (`agents/scenario-runner.md`), which carries the shared instructions: what to read, how to report, and the closing `Scenario:` / `Findings:` / `Notes:` lines. At audit time, `scripts/init.sh` splits this file into `.security-audit/refs/scenarios/S<n>.md`, so each agent reads only its own section. Keep the `## S<n>. <Name>` heading format; the split depends on it.
+Each scenario runs in a `scenario-runner` agent (`agents/scenario-runner.md`), which carries the shared instructions: what to read, how to report, and the closing `Scenario:` / `Findings:` / `Notes:` lines. At audit time, `scripts/audit.py init` splits this file into `.security-audit/work/refs/scenarios/S<n>.md`, so each agent reads only its own section. Keep the `## S<n>. <Name>` heading format and the `**Covers:**` line (the OWASP categories the scenario is designed to probe); the split and the coverage report depend on them.
 
 Scenarios are designed to be run in parallel. They will overlap with Phase 2a findings — that's fine; deduplication happens before validation.
 
@@ -11,6 +11,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 ---
 
 ## S1. Injection sinks → trust boundaries
+
+**Covers:** A05
 
 **Question:** For every place the application sends data to an interpreter (SQL, shell, template, LDAP, XPath, NoSQL, raw eval), can untrusted input reach it without parameterization or escaping?
 
@@ -32,6 +34,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 
 ## S2. Object-level authorization (IDOR / BOLA)
 
+**Covers:** A01, API1, API3
+
 **Question:** For every handler that accepts an object identifier from the request and reads or modifies that object, does the code verify the caller owns or is permitted to access that object?
 
 **Find candidate handlers:**
@@ -47,6 +51,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 ---
 
 ## S3. Function-level authorization (admin / privileged paths)
+
+**Covers:** A01, API5
 
 **Question:** For every endpoint or function intended for admins / specific roles, is the role gate present, correct, and reached on every request method?
 
@@ -65,6 +71,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 ---
 
 ## S4. Server-Side Request Forgery (SSRF)
+
+**Covers:** A01, API7
 
 **Question:** For every outbound HTTP request, can an attacker influence the destination URL?
 
@@ -87,6 +95,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 
 ## S5. Authentication enforcement & middleware ordering
 
+**Covers:** A01, A02, A07, API2, API8
+
 **Question:** For every route that should require authentication, does the auth middleware actually run for that route under all HTTP methods?
 
 **Find candidates:** every route in `recon.md`'s route map, except those listed under "Public surface." The map records which guards a quick pass saw; your job is to verify them. Treat `none` and `?` entries as leads to run down, and check that the listed guard really applies before clearing any route that has one.
@@ -107,6 +117,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 
 ## S6. Cryptographic primitives
 
+**Covers:** A04, A07
+
 **Question:** Where the application performs hashing, encryption, signing, or random generation, are the primitives appropriate and used correctly?
 
 **Find usages:**
@@ -126,6 +138,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 
 ## S7. Untrusted deserialization
 
+**Covers:** A08
+
 **Question:** Where the application deserializes data from outside its own runtime, can the resulting object instantiate arbitrary classes or trigger code execution?
 
 **Find usages:**
@@ -143,6 +157,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 
 ## S8. Resource consumption / abuse
 
+**Covers:** A06, A10, API4, API6
+
 **Question:** Where can a single request cause disproportionate resource use (CPU, memory, money, third-party rate limits)?
 
 **Find candidates:**
@@ -159,6 +175,8 @@ Grep patterns below are starters. Reviewers must adapt them to the project's act
 ---
 
 ## S9. Logging & data exposure
+
+**Covers:** A09, A02
 
 **Question:** What does the app log, and what does it expose in errors?
 
@@ -180,6 +198,8 @@ Missing logging on these is `Low` severity unless the user has flagged complianc
 ---
 
 ## S10. Mishandling exceptional conditions
+
+**Covers:** A10
 
 **Question:** When something goes wrong, does the system fail closed and clean up?
 

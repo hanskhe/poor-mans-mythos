@@ -1,0 +1,17 @@
+# File Classification
+
+Generated: {{ generated.strftime("%Y-%m-%dT%H:%M:%SZ") }}
+Total files: {{ groups.values()|map("length")|sum }}
+Review: {{ groups.review|length }} · Skim: {{ groups.skim|length }} · Skip: {{ groups.skip|length }}
+{% for bucket in ["review", "skim"] %}
+
+## {{ bucket|title }} ({{ groups[bucket]|length }})
+{% for f in groups[bucket]|rows %}
+- {{ f.path }} — {{ f.reason }}
+{% endfor %}
+{% endfor %}
+
+## Skip ({{ groups.skip|length }})
+{% for reason, n in groups.skip.reason.value_counts().sort_index().items() %}
+- {{ reason }}: {{ n }} files
+{% endfor %}

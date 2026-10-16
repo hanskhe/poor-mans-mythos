@@ -18,11 +18,11 @@ Your task message gives you two things:
 
 In your first turn, read these four files in parallel (one message, four Read calls):
 - `.security-audit/recon.md`: stack, auth model, entry points, the route map, outbound surface, trust boundaries.
-- `.security-audit/refs/scenarios/<Scenario>.md`: your scenario. This is your brief.
-- `.security-audit/refs/severity-rubric.md`
-- `.security-audit/refs/finding-format.md`: the "Raw finding" section is your output format.
+- `.security-audit/work/refs/scenarios/<Scenario>.md`: your scenario. This is your brief.
+- `.security-audit/work/refs/severity-rubric.md`
+- `.security-audit/work/refs/finding-format.md`: the "Raw findings" section is your output format.
 
-Read `.security-audit/refs/owasp-top10.md` or `.security-audit/refs/owasp-api-top10.md` only if you need them to settle which category code applies.
+Read `.security-audit/work/refs/owasp-top10.md` or `.security-audit/work/refs/owasp-api-top10.md` only if you need them to settle which category code applies.
 
 ## Run the scenario
 
@@ -41,17 +41,9 @@ Everything you read stays in your context and is re-sent on every later turn, so
 ## Output
 
 When done, write your output with a single Write call to the `Output:` path:
-- one `---FINDING---` block per distinct issue, exactly as `finding-format.md` specifies. Labels go at the start of the line, without bold or bullets.
-- `Source: 2b:<Scenario>`, for example `Source: 2b:S3`.
-- if one root cause appears in many places, file it once on the canonical site and list the other sites under `References:`.
-- end the file with these three lines, always:
+- the YAML `finding-format.md` specifies: `scenario`, `notes`, and one entry under `findings` per distinct issue (`findings: []` if none).
+- if one root cause appears in many places, file it once on the canonical site and list the other sites under `references`.
 
-```
-Scenario: <S#> <scenario name>
-Findings: <count>
-Notes: <1-3 sentences: what you searched for, how many candidates you examined, and any uncertainty or area you could not cover>
-```
+Always write `notes`: it feeds the audit's coverage statement, and a zero-finding scenario counts as information. For example: "Found 14 SQL sinks; all use Knex placeholders. Two raw() calls (db/report.js:40, :88) interpolate only constants. Not reviewed: dynamic ORDER BY (none located)."
 
-The Notes line feeds the audit's coverage statement, and a zero-finding scenario counts as information. For example: "Found 14 SQL sinks; all use Knex placeholders. Two raw() calls (db/report.js:40, :88) interpolate only constants. Not reviewed: dynamic ORDER BY (none located)."
-
-The orchestrator does not read your reply; scripts parse your output file. Your final reply is one line only, for example: `S3: 2 findings (H1 L1)`.
+A script reads your output file; nothing reads your reply for content. The reply still lands in the orchestrator's context and is re-sent on every later turn of the audit, so it is exactly one line in this form and nothing else: `S3: 2 findings (H1 L1)` or `S3: no findings`. No explanation, no output path, no caveats or hand-offs to other scenarios. Anything worth saying belongs in `notes`.
