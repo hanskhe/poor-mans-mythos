@@ -52,6 +52,10 @@ Every run records subagent token usage in the report, so costs can be compared a
 
 Requirements: [uv](https://docs.astral.sh/uv/), which installs the script's Python dependencies (pandas, Jinja2, PyYAML, pathspec, Typer) on first run.
 
+## Development
+
+End-to-end evals, which run full audits on small vulnerable fixture apps and grade the reports, live in [`evals/`](evals/README.md).
+
 ## License
 
 MIT

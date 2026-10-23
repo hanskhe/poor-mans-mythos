@@ -1,0 +1,15 @@
+[project]
+name = "notes"
+version = "0.3.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.118",
+    "itsdangerous>=2.2",
+    "pwdlib[argon2]>=0.2",
+    "python-multipart>=0.0.20",
+    "pyyaml>=6.0.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

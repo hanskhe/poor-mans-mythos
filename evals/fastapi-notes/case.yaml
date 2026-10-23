@@ -1,0 +1,113 @@
+# A FastAPI notes service with six planted vulnerabilities and four safe look-alikes.
+# The graders are the ground truth; fixture/ is what the audit sees and holds no hints.
+schema_version: "1.1"
+name: fastapi-notes
+tags: [e2e, python]
+runs: 1
+execution:
+  max_turns: 150
+  timeout_seconds: 3600
+  allowed_tools: [Read, Grep, Glob, Bash, Write, Edit, Skill, Agent]
+  prompt: |
+    Run a security audit on this repo.
+
+    This is an unattended run: don't ask me anything, use these answers instead.
+    - Highest-impact attack: reading or changing another user's private notes, or becoming an admin.
+    - Users: anyone on the internet can register. Admins are users with is_admin = 1.
+    - Nothing is out of scope.
+    - Review all Review files, and validate all findings.
+    - Don't run `audit.py clean`; leave the working files in place.
+context:
+  add_dirs: [./fixture]
+
+graders:
+  - {type: file_exists, name: report-written, path: ".security-audit/report-*.md"}
+  - {type: file_exists, name: coverage-written, path: ".security-audit/coverage.md"}
+
+  # Recall: each planted vulnerability is reported as real (Confirmed, Upgraded or Downgraded).
+  - type: llm
+    name: sqli-search
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings (not false positives, duplicates or
+      unvalidated ones) there is a SQL injection (CWE-89) in notes/notes.py in the search route
+      (around line 52), where the `q` query parameter is interpolated into a LIKE clause.
+  - type: llm
+    name: idor-show-note
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is a broken object-level
+      authorization / IDOR finding (e.g. CWE-639 or CWE-862) for notes/notes.py `show`
+      (/notes/{note_id}, around line 26): any logged-in user can read any note because the query
+      doesn't check owner_id.
+  - type: llm
+    name: mass-assignment-register
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is a mass assignment / privilege
+      escalation finding (e.g. CWE-915, CWE-269 or API3) for notes/auth.py `register` (around
+      line 34): it accepts the UserIn model, whose is_admin field (around line 19) the client can
+      set to true when signing up.
+  - type: llm
+    name: admin-no-role-check
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is a missing function-level
+      authorization finding (e.g. CWE-285, CWE-862 or API5) for notes/admin.py: the /admin routes
+      (listing, creating or deleting users) only depend on current_user and never check is_admin.
+  - type: llm
+    name: unbounded-import
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is an unrestricted resource
+      consumption finding (e.g. CWE-400, CWE-770 or API4) for notes/importer.py `import_bundle`
+      (around line 11): the whole upload is read into memory with no size limit and every note in
+      it is inserted with no cap on the count.
+  - type: llm
+    name: hardcoded-secret-debug
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is one about notes/config.py:
+      a hard-coded SECRET_KEY used to sign the session cookie in notes/app.py (CWE-798 / CWE-321,
+      allowing forged sessions) and/or DEBUG = True (FastAPI debug mode returns tracebacks).
+      Either aspect counts.
+
+  # Precision: safe look-alikes must not be reported as real vulnerabilities.
+  - type: llm
+    name: decoy-sort-column
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims SQL injection through the `sort`
+      parameter of notes/notes.py `index` (ORDER BY {column}, around line 20). That column is
+      checked against the SORTABLE allowlist. Listing it as a false positive is fine. A finding
+      about the search route's LIKE clause is a different issue and does not fail this check.
+  - type: llm
+    name: decoy-delete-scoped
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims IDOR in notes/notes.py `delete`
+      (around line 42), which deletes only where id and owner_id both match. A finding about
+      `show` is a different issue and does not fail this check.
+  - type: llm
+    name: decoy-search-limit
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims unbounded result size in
+      notes/notes.py `search`: `limit` is constrained with Query(ge=1, le=100) (around line 50).
+      The SQL injection in the same route is a different issue and does not fail this check.
+  - type: llm
+    name: decoy-yaml-safe-load
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims insecure deserialization or code
+      execution in notes/importer.py, which uses yaml.safe_load. A finding about the missing size
+      limit on the import is a different issue and does not fail this check.
+
+  # Severity calibration.
+  - type: llm
+    name: severity-calibration
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      The search SQL injection (notes/notes.py) and the is_admin mass assignment (notes/auth.py)
+      are each rated Critical or High, and the unbounded import is not rated Critical. Pass if
+      this holds for whichever of these are reported.

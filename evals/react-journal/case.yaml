@@ -1,0 +1,56 @@
+# A carefully written React client with no planted vulnerabilities: measures false positives.
+# Several spots look risky (dangerouslySetInnerHTML, ?next= redirects, postMessage) but are safe.
+schema_version: "1.1"
+name: react-journal
+tags: [e2e, node, precision]
+runs: 1
+execution:
+  max_turns: 150
+  timeout_seconds: 3600
+  allowed_tools: [Read, Grep, Glob, Bash, Write, Edit, Skill, Agent]
+  prompt: |
+    Run a security audit on this repo.
+
+    This is an unattended run: don't ask me anything, use these answers instead.
+    - Highest-impact attack: reading another user's private journal entries, or running script in their browser session.
+    - Users: anyone on the internet can register. The API is a separate service, not in this repo; it uses an HttpOnly, SameSite=Lax session cookie.
+    - Nothing is out of scope.
+    - Review all Review files, and validate all findings.
+    - Don't run `audit.py clean`; leave the working files in place.
+context:
+  add_dirs: [./fixture]
+
+graders:
+  - {type: file_exists, name: report-written, path: ".security-audit/report-*.md"}
+  - type: llm
+    name: no-critical-or-high
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      The report has no confirmed, upgraded or downgraded finding whose final severity is
+      Critical or High. Medium and Low findings (e.g. no Content-Security-Policy) are acceptable.
+  - type: llm
+    name: no-false-xss
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims XSS in src/components/Markdown.tsx
+      (dangerouslySetInnerHTML, around line 14). The HTML from marked is passed through
+      DOMPurify.sanitize first.
+  - type: llm
+    name: no-false-open-redirect
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims an open redirect or javascript: URL
+      injection through the `next` parameter in src/pages/Login.tsx / src/redirect.ts. safeNext
+      resolves the value against the current origin and rejects any other origin.
+  - type: llm
+    name: no-false-postmessage
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims a missing origin check in the message
+      listener in src/components/ShareWidget.tsx (around line 10). It checks event.origin and
+      event.source and only reads a bounded numeric height.
+  - type: llm
+    name: few-findings
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      The report has at most three confirmed, upgraded or downgraded findings in total.

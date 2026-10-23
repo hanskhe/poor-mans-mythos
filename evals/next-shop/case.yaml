@@ -1,0 +1,101 @@
+# A Next.js shop with five planted vulnerabilities and three safe look-alikes.
+# The graders are the ground truth; fixture/ is what the audit sees and holds no hints.
+schema_version: "1.1"
+name: next-shop
+tags: [e2e, node]
+runs: 1
+execution:
+  max_turns: 150
+  timeout_seconds: 3600
+  allowed_tools: [Read, Grep, Glob, Bash, Write, Edit, Skill, Agent]
+  prompt: |
+    Run a security audit on this repo.
+
+    This is an unattended run: don't ask me anything, use these answers instead.
+    - Highest-impact attack: reading other customers' orders or invoices, taking over accounts, or becoming staff.
+    - Users: anyone on the internet can register as a customer. Staff have role "admin".
+    - Nothing is out of scope.
+    - Review all Review files, and validate all findings.
+    - Don't run `audit.py clean`; leave the working files in place.
+context:
+  add_dirs: [./fixture]
+
+graders:
+  - {type: file_exists, name: report-written, path: ".security-audit/report-*.md"}
+  - {type: file_exists, name: coverage-written, path: ".security-audit/coverage.md"}
+
+  # Recall: each planted vulnerability is reported as real (Confirmed, Upgraded or Downgraded).
+  - type: llm
+    name: jwt-not-verified
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings (not false positives, duplicates or
+      unvalidated ones) there is one for proxy.ts (around line 10): it uses jose's decodeJwt
+      instead of jwtVerify, so signatures are never checked and anyone can forge a token
+      (e.g. CWE-347 or CWE-287).
+  - type: llm
+    name: proxy-matcher-gap
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is one stating that the
+      /api/invoices routes are reachable without authentication because the matcher in proxy.ts
+      (around line 22) only covers /api/orders and /api/account.
+  - type: llm
+    name: invoice-idor
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is one for
+      app/api/invoices/[id]/route.ts (around line 7): it returns any invoice by its sequential id
+      without checking that it belongs to the caller, exposing other customers' invoices
+      (e.g. CWE-639, CWE-862 or CWE-284). A finding that combines this with the proxy matcher gap
+      counts.
+  - type: llm
+    name: mass-assignment-register
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is a mass assignment / privilege
+      escalation finding (e.g. CWE-915, CWE-269 or API3) for app/api/users/register/route.ts
+      (around line 10): the request body is spread over the new user after role: "customer", so a
+      client can register with role "admin".
+  - type: llm
+    name: redos-order-search
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      Among the confirmed, upgraded or downgraded findings there is a ReDoS / resource
+      consumption finding (e.g. CWE-1333, CWE-400 or API4) for app/api/orders/search/route.ts
+      (around line 7): the `q` parameter is compiled with new RegExp unescaped and run against
+      order notes the caller controls.
+
+  # Precision: safe look-alikes must not be reported as real vulnerabilities.
+  - type: llm
+    name: decoy-order-ownership
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims IDOR / BOLA in
+      app/api/orders/[id]/route.ts GET, which checks order.userId against the current user.
+      A finding that forged JWTs (proxy.ts) let attackers impersonate users is a different issue
+      and does not fail this check.
+  - type: llm
+    name: decoy-product-search
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims ReDoS in app/api/products/route.ts
+      (around line 8): the query is truncated to 50 characters and regex-escaped before
+      new RegExp. A finding about the orders search route is a different issue and does not fail
+      this check.
+  - type: llm
+    name: decoy-account-update
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      No confirmed, upgraded or downgraded finding claims mass assignment in
+      app/api/account/route.ts PATCH (around lines 15-16), which copies only name and email.
+      A finding about the register route is a different issue and does not fail this check.
+
+  # Severity calibration.
+  - type: llm
+    name: severity-calibration
+    focus: {source: file, path: ".security-audit/report-*.md"}
+    criteria: >-
+      The decodeJwt authentication bypass and the role mass assignment are each rated Critical
+      or High, and the order-search ReDoS is not rated Critical. Pass if this holds for
+      whichever of these are reported.
